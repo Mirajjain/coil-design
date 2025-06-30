@@ -1,24 +1,7 @@
 import streamlit as st
 from fpdf import FPDF
 from datetime import datetime
-
-# === Page Setup ===
-st.set_page_config(page_title="DX Coil Designer (R-410A)", layout="centered")
-st.title("❄️ DX Cooling Coil Designer - R410A")
-
-# === Input Section ===
-col1, col2 = st.columns(2)
-
-with col1:
-    tr = st.number_input("Cooling Capacity (TR)", min_value=1.0, step=0.5)
-    cfm = st.number_input("Airflow (CFM)", min_value=300)
-    rows = st.number_input("No. of Coil Rows", min_value=1, step=1)
-    fpi = st.number_input("Fins Per Inch (FPI)", min_value=8, max_value=16, step=1)
-
-with col2:
-    tubes_per_row = st.number_input("Tubes per Row", min_value=6, step=1)
-    tube_dia_in = st.selectbox("Tube Diameter", ["3/8 inch", "1/2 inch", "5/8 inch"])
-    tube_length_ft = st.number_input("Tube Length (ft per tube)", min_value=1.0, step=0.5)
+import io
 
 # === Constants ===
 BTU_PER_TR = 12000
@@ -33,8 +16,8 @@ tube_inner_dia_in = {
     "5/8 inch": 0.527
 }
 
-# === PDF Function ===
-def generate_pdf(tr, cfm, rows, fpi, tubes_per_row, tube_length_ft, tube_dia_in, total_tubes, total_copper_length, surface_area, circuits, flow_per_circuit, velocity_ft_s):
+# === PDF Function (In-Memory) ===
+def generate_pdf_bytes(tr, cfm, rows, fpi, tubes_per_row, tube_length_ft, tube_dia_in, total_tubes, total_copper_length, surface_area, circuits, flow_per_circuit, velocity_ft_s):
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", size=12)
@@ -72,54 +55,88 @@ def generate_pdf(tr, cfm, rows, fpi, tubes_per_row, tube_length_ft, tube_dia_in,
         pdf.cell(200, 10, txt="✅ Velocity is within optimal range (40–80 ft/s)", ln=1)
 
     pdf.set_text_color(0, 0, 0)
-    filename = f"DX_Coil_Design_{tr}TR_{today.replace('-', '')}.pdf"
-    pdf.output(filename)
-    return filename
+    buffer = io.BytesIO()
+    pdf.output(buffer)
+    buffer.seek(0)
+    return buffer
 
-# === Main Logic ===
-if st.button("🧮 Calculate DX Coil"):
-    # --- Calculations ---
+# === Streamlit UI ===
+st.set_page_config(page_title="DX Coil Designer", layout="centered")
+st.title("❄️ DX Cooling Coil Designer - R410A")
+
+# === Inputs ===
+col1, col2 = st.columns(2)
+with col1:
+    tr = st.number_input("Cooling Capacity (TR)", min_value=1.0, step=0.5)
+    cfm = st.number_input("Airflow (CFM)", min_value=300)
+    rows = st.number_input("Coil Rows", min_value=1, step=1)
+    fpi = st.number_input("Fins Per Inch (FPI)", min_value=8, max_value=16, step=1)
+with col2:
+    tubes_per_row = st.number_input("Tubes per Row", min_value=6, step=1)
+    tube_dia_in = st.selectbox("Tube Diameter", ["3/8 inch", "1/2 inch", "5/8 inch"])
+    tube_length_ft = st.number_input("Tube Length (ft)", min_value=1.0, step=0.5)
+
+# === Calculation ===
+if st.button("🧲 Calculate DX Coil"):
     btu_hr = tr * BTU_PER_TR
     total_tubes = tubes_per_row * rows
     total_copper_length = total_tubes * tube_length_ft
+    surface_area = round(total_copper_length * tube_area_ft2_per_ft[tube_dia_in], 2)
     circuits = round(tr * 2)
     flow_per_circuit = round(tr / circuits, 2)
-    surface_area = round(total_copper_length * tube_area_ft2_per_ft[tube_dia_in], 2)
 
-    # --- Velocity Calculation ---
-    mass_flow_rate = tr * 180  # lb/hr
-    mass_flow_rate_per_circuit = mass_flow_rate / circuits
+    # === Refrigerant velocity (correct for R-410A) ===
+    capacity_kw = tr * 3.517
+    latent_heat_kj_per_kg = 300
+    mass_flow_rate_kg_s = (capacity_kw * 1000) / latent_heat_kj_per_kg
+    mass_flow_rate_per_circuit = mass_flow_rate_kg_s / circuits
+
     dia_in = tube_inner_dia_in[tube_dia_in]
-    area_in2 = 3.1416 * (dia_in / 2) ** 2
-    area_ft2 = area_in2 / 144
-    refrigerant_density = 0.3  # lb/ft³ (approx R410A vapor)
-    velocity_ft_s = (mass_flow_rate_per_circuit / 3600) / (refrigerant_density * area_ft2)
+    dia_m = dia_in * 0.0254
+    area_m2 = 3.1416 * (dia_m / 2) ** 2
+    refrigerant_density = 19  # kg/m^3 for R-410A
 
-    # --- Display Results ---
-    st.subheader("📊 Results:")
-    st.write(f"🔹 Total Cooling Load: **{btu_hr:,} BTU/hr**")
-    st.write(f"🔹 Total Tubes: **{total_tubes}**")
-    st.write(f"🔹 Copper Tube Length: **{total_copper_length} ft**")
-    st.write(f"🔹 Fin Surface Area: **{surface_area} ft²**")
-    st.write(f"🔹 Suggested Circuits: **{circuits}**")
-    st.write(f"🔹 Flow per Circuit: **{flow_per_circuit} TR**")
+    velocity_m_s = mass_flow_rate_per_circuit / (refrigerant_density * area_m2)
+    velocity_ft_s = velocity_m_s * 3.28084
 
-    st.markdown("---")
-    st.subheader("💨 Refrigerant Flow Check")
-    st.write(f"🔹 Refrigerant Velocity: **{velocity_ft_s:.2f} ft/s**")
+    st.session_state.result = {
+        'tr': tr, 'cfm': cfm, 'rows': rows, 'fpi': fpi,
+        'tubes_per_row': tubes_per_row, 'tube_length_ft': tube_length_ft,
+        'tube_dia_in': tube_dia_in, 'total_tubes': total_tubes,
+        'total_copper_length': total_copper_length, 'surface_area': surface_area,
+        'circuits': circuits, 'flow_per_circuit': flow_per_circuit,
+        'velocity_ft_s': velocity_ft_s
+    }
+
+    # Output
+    st.subheader("📊 Results")
+    st.write(f"🔹 Total Cooling Load: {btu_hr:,} BTU/hr")
+    st.write(f"🔹 Total Tubes: {total_tubes}")
+    st.write(f"🔹 Copper Tube Length: {total_copper_length} ft")
+    st.write(f"🔹 Surface Area: {surface_area} ft²")
+    st.write(f"🔹 Circuits: {circuits}")
+    st.write(f"🔹 Flow per Circuit: {flow_per_circuit} TR")
+    st.write(f"🔹 Refrigerant Velocity: {velocity_ft_s:.2f} ft/s")
 
     if velocity_ft_s < 40:
-        st.warning("⚠️ Velocity too low — risk of oil return failure!")
+        st.warning("⚠️ Too low velocity — oil return issue")
     elif velocity_ft_s > 80:
-        st.warning("⚠️ Velocity too high — possible noise or erosion!")
+        st.warning("⚠️ Too high velocity — erosion risk")
     else:
-        st.success("✅ Velocity is within ideal range (40–80 ft/s)")
+        st.success("✅ Velocity is optimal")
 
-    # --- Download PDF ---
-    if st.button("📥 Download PDF Report"):
-        pdf_file = generate_pdf(
-            tr, cfm, rows, fpi, tubes_per_row, tube_length_ft, tube_dia_in,
-            total_tubes, total_copper_length, surface_area, circuits,
-            flow_per_circuit, velocity_ft_s
-        )
-        st.success(f"✅ PDF saved as: {pdf_file}")
+# === Download PDF Button ===
+if 'result' in st.session_state:
+    r = st.session_state.result
+    pdf_file = generate_pdf_bytes(
+        r['tr'], r['cfm'], r['rows'], r['fpi'], r['tubes_per_row'],
+        r['tube_length_ft'], r['tube_dia_in'], r['total_tubes'],
+        r['total_copper_length'], r['surface_area'], r['circuits'],
+        r['flow_per_circuit'], r['velocity_ft_s']
+    )
+    st.download_button(
+        label="📅 Download PDF Report",
+        data=pdf_file,
+        file_name=f"DX_Coil_{r['tr']}TR_Report.pdf",
+        mime="application/pdf"
+    )
