@@ -18,14 +18,13 @@ tube_inner_dia_in = {
     "5/8 inch": 0.527
 }
 
-# === Generate PDF with Unicode Font ===
+# === PDF Generator ===
 def generate_pdf_bytes(tr, cfm, rows, fpi, tubes_per_row, tube_length_ft,
                        tube_dia_in, total_tubes, total_copper_length, surface_area,
                        circuits, flow_per_circuit, velocity_ft_s):
     pdf = FPDF()
     pdf.add_page()
 
-    # Use DejaVuSans Unicode font
     font_path = "DejaVuSans.ttf"
     if not os.path.exists(font_path):
         raise FileNotFoundError("DejaVuSans.ttf not found.")
@@ -57,13 +56,13 @@ def generate_pdf_bytes(tr, cfm, rows, fpi, tubes_per_row, tube_length_ft,
 
     if velocity_ft_s < 40:
         pdf.set_text_color(255, 0, 0)
-        pdf.cell(0, 10, txt="⚠️ Velocity too low — risk of oil return failure", ln=1)
+        pdf.cell(0, 10, txt="Warning: Velocity too low — risk of oil return failure", ln=1)
     elif velocity_ft_s > 80:
         pdf.set_text_color(255, 165, 0)
-        pdf.cell(0, 10, txt="⚠️ Velocity too high — risk of noise/erosion", ln=1)
+        pdf.cell(0, 10, txt="Warning: Velocity too high — risk of noise/erosion", ln=1)
     else:
         pdf.set_text_color(0, 128, 0)
-        pdf.cell(0, 10, txt="✅ Velocity is within optimal range (40–80 ft/s)", ln=1)
+        pdf.cell(0, 10, txt="Velocity is within optimal range (40–80 ft/s)", ln=1)
 
     pdf.set_text_color(0, 0, 0)
 
@@ -74,7 +73,7 @@ def generate_pdf_bytes(tr, cfm, rows, fpi, tubes_per_row, tube_length_ft,
 
 # === Plot Coil Layout ===
 def draw_coil_layout(rows, tubes_per_row):
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(figsize=(5, 3), dpi=100)
     ax.set_aspect('equal')
     h_spacing, v_spacing = 20, 20
 
@@ -93,7 +92,7 @@ def draw_coil_layout(rows, tubes_per_row):
 
 # === Streamlit App ===
 st.set_page_config(page_title="DX Coil Designer", layout="centered")
-st.title("❄️ DX Cooling Coil Designer - R410A")
+st.title("DX Cooling Coil Designer - R410A")
 
 col1, col2 = st.columns(2)
 with col1:
@@ -106,14 +105,13 @@ with col2:
     tube_dia_in = st.selectbox("Tube Diameter", ["3/8 inch", "1/2 inch", "5/8 inch"])
     tube_length_ft = st.number_input("Tube Length (ft)", min_value=1.0, step=0.5)
 
-if st.button("🧲 Calculate DX Coil"):
+if st.button("Calculate DX Coil"):
     btu_hr = tr * BTU_PER_TR
     total_tubes = tubes_per_row * rows
     total_copper_length = total_tubes * tube_length_ft
     surface_area = round(total_copper_length * tube_area_ft2_per_ft[tube_dia_in], 2)
     circuits = round(tr * 2)
     flow_per_circuit = round(tr / circuits, 2)
-
     capacity_kw = tr * 3.517
     latent_heat_kj_per_kg = 300
     mass_flow_rate_kg_s = (capacity_kw * 1000) / latent_heat_kj_per_kg
@@ -135,30 +133,30 @@ if st.button("🧲 Calculate DX Coil"):
         'velocity_ft_s': velocity_ft_s
     }
 
-    st.subheader("📊 Results")
-    st.write(f"🔹 Total Cooling Load: {btu_hr:,} BTU/hr")
-    st.write(f"🔹 Total Tubes: {total_tubes}")
-    st.write(f"🔹 Copper Tube Length: {total_copper_length} ft")
-    st.write(f"🔹 Surface Area: {surface_area} ft²")
-    st.write(f"🔹 Circuits: {circuits}")
-    st.write(f"🔹 Flow per Circuit: {flow_per_circuit} TR")
-    st.write(f"🔹 Refrigerant Velocity: {velocity_ft_s:.2f} ft/s")
+    st.subheader("Results")
+    st.write(f"Total Cooling Load: {btu_hr:,} BTU/hr")
+    st.write(f"Total Tubes: {total_tubes}")
+    st.write(f"Copper Tube Length: {total_copper_length} ft")
+    st.write(f"Surface Area: {surface_area} ft²")
+    st.write(f"Circuits: {circuits}")
+    st.write(f"Flow per Circuit: {flow_per_circuit} TR")
+    st.write(f"Refrigerant Velocity: {velocity_ft_s:.2f} ft/s")
 
     if velocity_ft_s < 40:
-        st.warning("⚠️ Too low velocity — oil return issue")
+        st.warning("Velocity too low — oil return issue")
     elif velocity_ft_s > 80:
-        st.warning("⚠️ Too high velocity — erosion risk")
+        st.warning("Velocity too high — erosion risk")
     else:
-        st.success("✅ Velocity is optimal")
+        st.success("Velocity is optimal")
 
-    st.subheader("🖼️ Coil Layout Diagram")
+    st.subheader("Coil Layout Diagram")
     fig = draw_coil_layout(rows, tubes_per_row)
     st.pyplot(fig)
 
     layout_buffer = io.BytesIO()
     fig.savefig(layout_buffer, format="pdf")
     layout_buffer.seek(0)
-    st.download_button("📐 Download Layout PDF", data=layout_buffer, file_name="coil_layout.pdf", mime="application/pdf")
+    st.download_button("Download Layout PDF", data=layout_buffer, file_name="coil_layout.pdf", mime="application/pdf")
 
 if 'result' in st.session_state:
     r = st.session_state.result
@@ -169,7 +167,7 @@ if 'result' in st.session_state:
         r['flow_per_circuit'], r['velocity_ft_s']
     )
     st.download_button(
-        label="📄 Download Report PDF",
+        label="Download Report PDF",
         data=pdf_file,
         file_name=f"DX_Coil_{r['tr']}TR_Report.pdf",
         mime="application/pdf"
